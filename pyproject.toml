@@ -1,0 +1,32 @@
+[tool.poetry]
+name = "mep-meetings"
+version = "0.1.0"
+description = ""
+authors = ["Istvan Peter Jaray <istvanpeterjaray@gmail.com>"]
+license = "MIT"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+pandas = "^2.2.3"
+numpy = "^2.2.0"
+requests = "^2.32.3"
+path = "^17.0.0"
+httpx = "^0.28.1"
+beautifulsoup4 = "^4.12.3"
+tqdm = "^4.67.1"
+loguru = "^0.7.3"
+tenacity = "^9.0.0"
+openpyxl = "^3.1.5"
+streamlit = "^1.41.1"
+
+
+[tool.poetry.group.dev.dependencies]
+jupyter = "^1.1.1"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+scrapethat = "mep_meetings.scraper.scraper:main"
