@@ -33,7 +33,10 @@ with col1:
         value="https://www.europarl.europa.eu/meps/en/256864/ANDRAS+TIVADAR_KULJA/meetings/past?meetingType=PAST&memberId=156789&termId=10&page=1&pageSize=10",
     )
     pages = st.number_input(
-        "Enter the number of pages to scrape:", min_value=1, max_value=100, value=50
+        'How many times would you have to click "Load more"?',
+        min_value=1,
+        max_value=100,
+        value=50,
     )
     scrape_button = st.button("Scrape Meetings")
 

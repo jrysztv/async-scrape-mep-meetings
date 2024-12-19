@@ -1,16 +1,12 @@
 # %%
 from abc import ABC, abstractmethod
-import datetime
-import os
-from pathlib import Path
 import httpx
 from asyncio import Semaphore
+import pandas as pd
 from tqdm import tqdm
 from tqdm.asyncio import tqdm_asyncio
-import asyncio
 from bs4 import BeautifulSoup
 import urllib
-import json
 from typing import List, Dict, Optional
 from loguru import logger
 from tenacity import retry, stop_after_attempt, wait_fixed
@@ -100,6 +96,11 @@ class BaseFetcher(ABC):  # Inherit from ABC (Abstract Base Class)
             return await wrapped_tasks
 
     async def run_async(self, pages: int = 1) -> None:
+        """
+        Run the fetcher asynchronously to retrieve and parse articles.
+
+        :param pages: The number of pages to fetch articles from.
+        """
         responses = await self.fetch_all_articles(pages)
         self.articles = [
             self.parse_article(article_html, article_url)
@@ -110,20 +111,27 @@ class BaseFetcher(ABC):  # Inherit from ABC (Abstract Base Class)
             )
             if article_html is not None
         ]
+        # self.articles
+
+        # Filter out None values and flatten the list of lists of dictionaries into a single list of dictionaries
+        self.articles = [
+            item for sublist in self.articles if sublist is not None for item in sublist
+        ]
 
 
 class EuroparlMeetingFetcher(BaseFetcher):
     def __init__(
-        self, referer_url: str, timeout: int = 10, max_connections: int = 3
+        self, referer_url: str, timeout: int = 10, max_connections: int = 8
     ) -> None:
         """
-        Initialize the KuljaFetcher with a specific base URL, timeout, and maximum connections.
+        Initialize the EuroparlMeetingFetcher with a specific base URL, timeout, and maximum connections.
 
+        :param referer_url: The referer URL for fetching articles.
         :param timeout: The timeout for HTTP requests.
         :param max_connections: The maximum number of concurrent connections.
 
         Example usage:
-        >>> fetcher = TelexFetcher()
+        >>> fetcher = EuroparlMeetingFetcher(referer_url="https://www.europarl.europa.eu/meps/en/256864/ANDRAS+TIVADAR_KULJA/meetings/past")
         >>> asyncio.run(fetcher.run_async(pages=1))
 
         """
@@ -134,6 +142,7 @@ class EuroparlMeetingFetcher(BaseFetcher):
         )
 
         self.referer_url = referer_url
+        self.article_links = [referer_url]
         self.member_id = self.extract_member_id(referer_url)
 
     @staticmethod
@@ -144,11 +153,10 @@ class EuroparlMeetingFetcher(BaseFetcher):
         Later on, this would be the entry point for the user to provide the member ID.
 
         :param referer_url: The referer URL containing the member ID.
-        :param page: The page number to retrieve links from.
         :return: The member ID extracted from the URL.
 
-        Exmaple usage:
-        >>> fetcher = TelexFetcher()
+        Example usage:
+        >>> fetcher = EuroparlMeetingFetcher()
         >>> fetcher.extract_member_id("https://www.europarl.europa.eu/meps/en/256864/ANDRAS+TIVADAR_KULJA/meetings/past")
 
         Example:
@@ -163,7 +171,7 @@ class EuroparlMeetingFetcher(BaseFetcher):
 
     def construct_or_retrieve_links(self, page: int) -> None:
         """
-        Here, we construct links to the html table responses.
+        Here, we construct links to the HTML table responses.
         We utilize urllib.parse.urlencode to encode the parameters and append them to the base URL.
         We store them in a list in self.article_links.
 
@@ -193,87 +201,82 @@ class EuroparlMeetingFetcher(BaseFetcher):
             return None
         try:
             page = int(re.search(r"page=(\d+)", article_url).group(1))
-        except Exception as e:
-            page = None
+        except Exception:
+            page = 0
 
         try:
+            meetings = []
             soup = BeautifulSoup(article_html, "html.parser")
-            records_dict = {
-                "Title": [],
-                "Date": [],
-                "Place": [],
-                "Capacity": [],
-                "Code of associated committee or delegation": [],
-                "Meeting with": [],
-                "page_number": [],
-            }
-
             headers = soup.select(".erpl_document-header")
-            if page is None:
-                page = [None] * len(headers)
             for header in headers:
+                record = {}
                 try:
-                    title = header.select_one(".t-item").get_text()
+                    record["Title"] = header.select_one(".t-item").get_text()
                 except Exception as e:
                     logger.warning(f"Failed to retrieve title: {e}")
-                    title = None
+                    record["Title"] = None
 
                 try:
-                    date = header.select_one("time").get("datetime")
+                    record["Date"] = header.select_one("time").get("datetime")
                 except Exception as e:
                     logger.warning(f"Failed to retrieve date: {e}")
-                    date = None
+                    record["Date"] = None
 
                 try:
-                    place = header.select_one(
+                    record["Place"] = header.select_one(
                         ".erpl_document-subtitle-location"
                     ).get_text()
                 except Exception as e:
                     logger.warning(f"Failed to retrieve place: {e}")
-                    place = None
+                    record["Place"] = None
 
                 try:
-                    capacity = (
-                        header.select_one(".mt-25:nth-child(3) .d-inline")
+                    record["Capacity"] = (
+                        header.select_one(".erpl_document-subtitle-capacity")
                         .get_text()
                         .strip()
                         .replace("\n", " - ")
                     )
                 except Exception as e:
                     logger.warning(f"Failed to retrieve capacity: {e}")
-                    capacity = None
+                    record["Capacity"] = None
 
                 try:
-                    code = (
-                        header.select_one(".mt-25:nth-child(4) .d-inline")
+                    record["Code of associated committee or delegation"] = (
+                        header.select_one(".erpl_badge-committee")
                         .get_text()
                         .strip()
                         .replace("\n", " - ")
                     )
                 except Exception as e:
                     logger.warning(f"Failed to retrieve code: {e}")
-                    code = None
+                    record["Code of associated committee or delegation"] = None
 
                 try:
-                    meeting = (
-                        header.select_one(".mt-25:nth-child(5) .d-inline")
+                    record["Meeting with"] = (
+                        header.select_one(".erpl_document-subtitle-author")
                         .get_text()
                         .strip()
                         .replace("\n", " - ")
                     )
                 except Exception as e:
                     logger.warning(f"Failed to retrieve meeting: {e}")
-                    meeting = None
+                    record["Meeting with"] = None
 
-                records_dict["Title"].append(title)
-                records_dict["Date"].append(date)
-                records_dict["Place"].append(place)
-                records_dict["Capacity"].append(capacity)
-                records_dict["Code of associated committee or delegation"].append(code)
-                records_dict["Meeting with"].append(meeting)
-                records_dict["page_number"].append(page)
+                record["page_number"] = page
+                meetings.append(record)
 
-            return records_dict
+            return meetings
         except Exception as e:
             logger.error(f"Failed to parse page: {article_url}: {e}")
             return None
+
+
+# %%
+response = httpx.get(
+    "https://www.europarl.europa.eu/meps/en/loadmore-meetings?meetingType=PAST&memberId=256864&termId=10&page=1000&pageSize=10"
+)  # %%
+response.status_code
+# %%
+response.content
+# %%
